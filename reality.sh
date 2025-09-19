@@ -1,6 +1,5 @@
 #!/bin/bash
 # REALITY一键安装脚本
-# Author: YouTube频道<https://www.youtube.com/@aifenxiangdexiaoqie>
 
 RED="\033[31m"      # Error message
 GREEN="\033[32m"    # Success message
@@ -199,7 +198,7 @@ getuuid() {
 # 指定节点名称
 getname() {
 	read -p "请输入您的节点名称，如果留空将保持默认：" USER_NAME
-	[[ -z "$USER_NAME" ]] && USER_NAME="Reality(by小企鹅)"
+	[[ -z "$USER_NAME" ]] && USER_NAME="Reality(by wiznb)"
     colorEcho $BLUE "节点名称：$USER_NAME"
 	echo "$USER_NAME" > /usr/local/etc/xray/name
 	echo ""
