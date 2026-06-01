@@ -41,12 +41,20 @@ install_xray() {
     fi
 
     echo "正在获取xray最新稳定版本号..."
-    last_version=$(curl -fsSL "https://api.github.com/repos/XTLS/Xray-core/releases/latest" \
-        | grep -m1 '"tag_name"[[:space:]]*:' \
-        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+    # 注意：不要把 curl 直接接到 grep -m1/head。
+    # 在 set -o pipefail 下，grep 提前退出会让 curl 收到 SIGPIPE，出现：curl: (23) Failure writing output to destination。
+    release_json=$(curl -fsSL --retry 3 --connect-timeout 15         "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/tmp/xray_version_curl.err) || {
+        red "获取xray版本号失败，请检查网络或GitHub API访问。"
+        yellow "curl错误信息：$(cat /tmp/xray_version_curl.err 2>/dev/null || true)"
+        exit 1
+    }
+
+    last_version=$(printf '%s
+' "$release_json"         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
 
     if [[ -z "${last_version:-}" ]]; then
-        red "获取xray版本号失败，请检查网络或GitHub API访问。"
+        red "获取xray版本号失败：GitHub API返回内容里没有tag_name。"
+        yellow "返回内容前200字节：${release_json:0:200}"
         exit 1
     fi
 
