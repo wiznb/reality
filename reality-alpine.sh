@@ -16,8 +16,12 @@ need_cmd() {
     }
 }
 
-need_cmd curl
 need_cmd unzip
+if ! command -v wget >/dev/null 2>&1 && ! command -v curl >/dev/null 2>&1; then
+    red "缺少下载工具：wget 或 curl 至少需要一个"
+    yellow "Alpine/OpenRC 可先执行：apk add --no-cache wget curl ca-certificates"
+    exit 1
+fi
 
 get_arch_zip() {
     case "$(uname -m)" in
@@ -34,50 +38,67 @@ get_arch_zip() {
     esac
 }
 
+fetch_to_file() {
+    local url="$1"
+    local output="$2"
+
+    rm -f "$output"
+
+    # Alpine 默认通常自带 busybox wget，优先用 wget，避免 curl stdout/管道导致的 23 错误。
+    if command -v wget >/dev/null 2>&1; then
+        if wget -q --tries=3 --timeout=30 -O "$output" "$url"; then
+            return 0
+        fi
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fL --retry 3 --connect-timeout 15 --max-time 180 -o "$output" "$url"; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
 install_xray() {
     if [[ -x "$XRAY_BIN" ]]; then
         green "xray文件已存在！"
         return 0
     fi
 
-    echo "正在获取xray最新稳定版本号..."
-    # 注意：不要把 curl 直接接到 grep -m1/head。
-    # 在 set -o pipefail 下，grep 提前退出会让 curl 收到 SIGPIPE，出现：curl: (23) Failure writing output to destination。
-    release_json=$(curl -fsSL --retry 3 --connect-timeout 15         "https://api.github.com/repos/XTLS/Xray-core/releases/latest" 2>/tmp/xray_version_curl.err) || {
-        red "获取xray版本号失败，请检查网络或GitHub API访问。"
-        yellow "curl错误信息：$(cat /tmp/xray_version_curl.err 2>/dev/null || true)"
-        exit 1
-    }
+    local xray_zip download_url tmp_zip
+    xray_zip=$(get_arch_zip)
+    download_url="https://github.com/XTLS/Xray-core/releases/latest/download/${xray_zip}"
+    tmp_zip="/tmp/${xray_zip}.$$"
 
-    last_version=$(printf '%s
-' "$release_json"         | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+    echo "正在下载xray最新稳定版..."
+    yellow "当前CPU架构：$(uname -m)，下载文件：$xray_zip"
+    yellow "下载地址：$download_url"
 
-    if [[ -z "${last_version:-}" ]]; then
-        red "获取xray版本号失败：GitHub API返回内容里没有tag_name。"
-        yellow "返回内容前200字节：${release_json:0:200}"
+    if [[ -e "$XRAY_DIR" && ! -d "$XRAY_DIR" ]]; then
+        red "$XRAY_DIR 已存在但不是目录，请先处理该文件。"
         exit 1
     fi
 
-    xray_zip=$(get_arch_zip)
-    download_url="https://github.com/XTLS/Xray-core/releases/download/${last_version}/${xray_zip}"
-    tmp_zip="/tmp/${xray_zip}"
-
-    yellow "xray最新稳定版本号为： $last_version"
-    yellow "当前CPU架构：$(uname -m)，下载文件：$xray_zip"
-    echo "开始下载xray文件..."
-
-    rm -f "$tmp_zip"
     mkdir -p "$XRAY_DIR"
 
-    if ! curl -fL --retry 3 --connect-timeout 15 -o "$tmp_zip" "$download_url"; then
+    if ! fetch_to_file "$download_url" "$tmp_zip"; then
         red "下载失败：$download_url"
-        yellow "如果GitHub访问不稳定，请换网络/代理后重试。"
+        yellow "这版脚本不再访问 GitHub API 获取版本号；如果这里失败，通常是服务器无法访问 GitHub 下载域名。"
+        yellow "可以先测试：wget -O /tmp/xray.zip '$download_url'"
+        rm -f "$tmp_zip"
+        exit 1
+    fi
+
+    if [[ ! -s "$tmp_zip" ]]; then
+        red "下载失败：文件为空。"
+        rm -f "$tmp_zip"
         exit 1
     fi
 
     if ! unzip -tq "$tmp_zip" >/dev/null; then
-        red "下载到的文件不是有效zip，可能被网络拦截或下载不完整。"
-        rm -f "$tmp_zip"
+        red "下载到的文件不是有效zip，可能被网络拦截、下载不完整，或当前架构对应的包不存在。"
+        yellow "临时文件：$tmp_zip"
         exit 1
     fi
 
@@ -92,7 +113,6 @@ install_xray() {
         exit 1
     fi
 }
-
 is_port_open() {
     local p="$1"
     timeout 1 bash -c "</dev/tcp/127.0.0.1/${p}" >/dev/null 2>&1
@@ -202,10 +222,15 @@ cat > "$XRAY_DIR/config.json" << EOF_JSON
 }
 EOF_JSON
 
-IP=$(curl -4 -fsSL --connect-timeout 10 https://api.ip.sb/ip 2>/dev/null || true)
-if [[ -z "${IP:-}" ]]; then
-    IP=$(curl -4 -fsSL --connect-timeout 10 https://api.ipify.org 2>/dev/null || true)
+IP=""
+ip_tmp="/tmp/xray_public_ip.$$"
+if fetch_to_file "https://api.ip.sb/ip" "$ip_tmp"; then
+    IP=$(tr -d '[:space:]' < "$ip_tmp")
 fi
+if [[ -z "${IP:-}" ]] && fetch_to_file "https://api.ipify.org" "$ip_tmp"; then
+    IP=$(tr -d '[:space:]' < "$ip_tmp")
+fi
+rm -f "$ip_tmp"
 if [[ -z "${IP:-}" ]]; then
     yellow "自动获取公网IP失败。"
     read -rp "请手动输入服务器公网IP：" IP
