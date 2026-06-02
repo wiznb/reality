@@ -12,3 +12,9 @@ wget https://raw.githubusercontent.com/wiznb/reality/refs/heads/main/reality-alp
 ```
 bash reality-alpine.sh
 ```
+```
+wget https://raw.githubusercontent.com/wiznb/reality/refs/heads/main/bbr-alpine.sh
+```
+```
+bbr-alpine.sh
+```
