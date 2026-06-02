@@ -16,5 +16,5 @@ bash reality-alpine.sh
 wget https://raw.githubusercontent.com/wiznb/reality/refs/heads/main/bbr-alpine.sh
 ```
 ```
-bbr-alpine.sh
+bash bbr-alpine.sh
 ```
